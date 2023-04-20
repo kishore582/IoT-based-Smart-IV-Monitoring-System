@@ -1,0 +1,133 @@
+#include <SoftwareSerial.h>
+#include <Servo.h>                                            //SERVO MOTOR LIBRARY
+#include <PulseSensorPlayground.h>                            //PULSE SENSOR LIBRARY
+#include <ESP8266WiFi.h>                                      //TO CONNECT TO THE SERVER
+#include <WiFiClient.h>
+#include <ESP8266WebServer.h>
+
+/* D0 = 16
+D1 = 5
+D2 = 4
+D3 = 0
+D4 = 2
+D5 = 14
+D6 = 12
+D7 = 13
+D8 = 15 */
+
+//NETWROK CREDENTIALS
+const char* ssid = "moto g31";
+const char* password = "Kishore Hotspot";
+
+ESP8266WebServer server(80);
+
+//SETTING GLOBAL VARIABLES
+int angleChange;                                               //MAKE SURE ONCE VALVE IS TURNED OFF, IT'S NOT DISTURBED AGAIN
+const int buzzerPin = 4;                                       //SETTING BUZZER
+const int servoPin = 14;                                       //SETTING SERVO MOTOR
+const int pulseSensorPin = 0;                                  //SETTING PULSE SENSOR
+int heartvoltage;                                              //TO FING THE VOLTAGE OUTPUT OF HEART
+int heartBeat = 0;                                             //INITIALISING HEARBEAT
+int totalCapacity;                                             //TOTAL LIQUID IN THE BOTTLE
+int drainRate = 2;                                             //AMOUNT OF LIQUID DRAINED PER MINUTE
+int timeTaken;                                                 //TIME TAKEN FOR LIQUID TO EMPTY
+int remainingCapacity;                                         //AMOUNT OF LIQUID PRESENT AT SAID TIME
+unsigned long startTime = 0;                                   //TO STORE THE START TIME
+unsigned long elapsedTime = 0;                                 //TO FIND AMOUNT OF TIME ELAPSED
+
+Servo myservo;                                                 //CREATING OBJECT FOR SERVO MOTOR
+
+void handleRoot() 
+{
+  String html = "<html><body>";
+  html += "<h1>Smart Glucose Drip Monitoring System</h1>";  
+  html += "<p>Heart Voltage : " + String(heartvoltage) + "</p>";
+
+  //Form to take input from user
+  html += "<form method='get' action='/'>";
+  html += "<label for='totalCapacity'>Total Capacity : </label>";
+  html += "<input type='number' id='totalCapacity' name='totalCapacity'>";
+  html += "<input type='submit' value='Submit'>";
+  html += "</form>";
+
+  //Update remainingCapacity and timeTaken
+  if(server.hasArg("totalCapacity"))  
+  {
+    elapsedTime = (millis()/60000) - startTime;
+    totalCapacity = server.arg("totalCapacity").toInt();
+    if (totalCapacity != 0)
+    {
+      timeTaken = totalCapacity / drainRate;                     //CALCULATED TIME TAKEN FOR BOTTLE TO EMPTY
+      int drained = drainRate * elapsedTime;                     //AMOUNT OF LIQUID DRAINED
+      remainingCapacity = totalCapacity - drained;               //REAMINING AMOUNT OF LIQUID PRESENT IN THE BOTTLE
+      totalCapacity = totalCapacity - drained;
+      timeTaken = timeTaken - elapsedTime;
+      if (totalCapacity == 0)
+      {
+        timeTaken = 0;
+        remainingCapacity = 0;
+        digitalWrite(buzzerPin, HIGH);                           //BUZZERS SOUNDS WHEN GLUCOSE LEVEL IN THE BOTTLE 10CM
+        angleChange=1;                                           //INITIATES TO MAKE THE VALVE CLOSE
+        html += "<p>Drip Completed! Patient needs attention!!</p>";
+      }
+      html += "<p>Remaining Capacity: " + String(remainingCapacity) + "</p>";
+      html += "<p>Time Taken: " + String(timeTaken) + " minutes</p>";
+      html += "</body></html>";
+    }
+
+    else
+    {
+      timeTaken = 0;
+      remainingCapacity = 0;
+      html += "<p>Drip Completed! Patient needs attention!!</p>";
+      html += "<p>Remaining Capacity: " + String(remainingCapacity) + "</p>";
+      html += "<p>Time Taken: " + String(timeTaken) + " minutes</p>";
+      html += "</body></html>";
+    }
+    
+  }
+
+  server.send(200, "text/html", html);
+}
+
+void setup()
+{
+  Serial.begin(9600);
+  startTime = millis()/60000;
+  //INITIALISING WI-FI NETWROK AND SERVER
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) 
+  {
+    delay(1000);
+    Serial.println("Connecting to WiFi...");
+  }
+  Serial.println("Connected to WiFi");
+  server.on("/", handleRoot);
+  server.begin();
+  Serial.println("HTTP server started");
+  Serial.print("IP address: ");
+  Serial.println(WiFi.localIP());
+
+  pinMode(buzzerPin,OUTPUT);                                   //DECLARING BUZZER
+  delay(500);
+  myservo.attach(14);                                          //DECLARING SERVO MOTOR
+  myservo.write(0);                                            //SET SERVOMOTOR TO ZERO DEGREE
+}
+
+void loop()
+{
+  //PULSE SENSOR
+  heartvoltage = analogRead(pulseSensorPin);                   //GETS VOLTAGE OF HEART
+  //heartBeat=60/0.8;
+  Serial.println(heartBeat);                                   //PRINTS THE HEARTBEAT  
+  delay(10);               
+
+  if (angleChange == 1)                                        //TO TURN OFF THE VALVE, PROGRAM ENTERS THE LOOP
+    {
+      myservo.write(180);                                      //WHEN GLUCOSE LEVEL REACHES LOW, VALVE IS CLOSED BY SERVO MOTOR
+      angleChange = 0;                                         //ONCE THE VALVE IS CLOSED, WE NEED NOT CHECK GLUCOSE LEVEL AGAIN. SO THIS LOOP IS TO BE STOPPED
+      delay(1000);
+    }
+
+  server.handleClient();                                       //HANDLE ANY INCOMING CLIENT REQUEST 
+}
